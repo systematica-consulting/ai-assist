@@ -5,7 +5,8 @@ import caldav
 from caldav.elements import dav, cdav
 import psycopg2
 import logging
-
+from openai import OpenAI
+from func import bot_respond,deepseek_respond,save_to_db,get_db,get_chat_history,mark_old
 
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
@@ -36,10 +37,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def user_exists(tg_id: str) -> bool:
     try:
         conn = psycopg2.connect(
-            dbname="test",
+            #dbname="test",
+            dbname="postgres",
             user="postgres",
-            password="max11skv",
-            host="localhost",  # или IP-адрес вашего сервера
+            #password="max11skv",
+            password="postgres",
+            host="localhost",
             port="5432"
         )
         cursor = conn.cursor()
@@ -153,9 +156,11 @@ async def get_events(update: Update, context: ContextTypes.DEFAULT_TYPE,  locati
 def save_user_credentials(tg_id: str, locationurl: str, login: str, password: str):
     try:
         conn = psycopg2.connect(
-            dbname="test",
+            # dbname="test",
+            dbname="postgres",
             user="postgres",
-            password="max11skv",
+            # password="max11skv",
+            password="postgres",
             host="localhost",
             port="5432"
         )
@@ -181,9 +186,11 @@ async def ask_for_location_url(update: Update, context: ContextTypes.DEFAULT_TYP
 def add_user_if_not_exists(tg_id, username: str):
     try:
         conn = psycopg2.connect(
-            dbname="test",
+            # dbname="test",
+            dbname="postgres",
             user="postgres",
-            password="max11skv",
+            # password="max11skv",
+            password="postgres",
             host="localhost",
             port="5432"
         )
@@ -213,6 +220,57 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = update.message.from_user.username
     tg_id = update.message.from_user.id
     text = update.message.text
+    if "current_model" in context.user_data:
+        if text == "Новый диалог":
+            mark_old(tg_id)
+            del context.user_data["current_model"]
+            keyboard = [["DeepSeek free", "Gemini", "DeepSeek"], ["Назад"]]
+            await update.message.reply_text(
+                "Выберите нейросеть:",
+                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+            return
+        save_to_db(tg_id, request=text)
+        history = get_chat_history(tg_id)
+        full_context = ""
+        for req, resp in history:
+            if req: full_context += f"User: {req}\n"
+            if resp: full_context += f"Assistant: {resp}\n"
+        try:
+            if context.user_data["current_model"] in ["DeepSeek free", "Gemini"]:
+                response = bot_respond(full_context, context.user_data["current_model"])
+            else:
+                response = deepseek_respond(full_context, context.user_data["current_model"])
+            await update.message.reply_text(response)
+            save_to_db(tg_id, response=response)
+        except Exception as e:
+            print(f"AI Error: {e}")
+            conn = get_db()
+            cur = conn.cursor()
+            try:
+                cur.execute("SELECT id FROM users WHERE tg_id = %s", (tg_id,))
+                user_id = cur.fetchone()[0]
+                cur.execute(
+                    "SELECT id FROM history WHERE user_id = %s AND response IS NULL ORDER BY id DESC LIMIT 1",
+                    (user_id,))
+                last_request = cur.fetchone()
+                if last_request:
+                    last_request_id = last_request[0]
+                    # Удаляем этот запрос
+                    cur.execute(
+                        "DELETE FROM history WHERE id = %s",
+                        (last_request_id,))
+                    conn.commit()
+            except Exception as db_error:
+                print(f"Database error while cleaning failed request: {db_error}")
+                conn.rollback()
+            finally:
+                conn.close()
+            error_msg = "⚠️ Не удалось получить ответ. Попробуйте еще раз."
+            if "429" in str(e):
+                error_msg = "⚠️ Слишком много запросов к нейросети. Пожалуйста, подождите минуту и попробуйте снова."
+            await update.message.reply_text(error_msg)
+        return
+
     if text == "Моё расписание":
         if not username:
             await update.message.reply_text("У вас не задан username в Telegram. Установите его в настройках профиля.")
@@ -243,11 +301,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await get_events(update, context, locationurl[tg_id], login[tg_id], password[tg_id])
 
     elif text == "Чат с ассистентом":
-        keyboard = [
-            ["DeepSeek", "Mistral", "Google Gemini"]
-        ]
-        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        await update.message.reply_text("Выберите нейросеть", reply_markup=reply_markup)
+        keyboard = [["DeepSeek free", "Gemini", "DeepSeek"], ["Назад"]]
+        await update.message.reply_text(
+            "Выберите нейросеть:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+
+    elif text in ["DeepSeek free", "Gemini", "DeepSeek"]:
+        models = {
+            "DeepSeek free": "deepseek/deepseek-r1-0528:free",
+            "Gemini": "google/gemini-2.0-flash-exp:free",
+            "DeepSeek": "deepseek-chat"}
+        context.user_data["current_model"] = models[text]
+        await update.message.reply_text(
+            f"✅ Выбрана {text}. Задавайте ваш вопрос!\n"
+            "🔄 'Новый диалог' — начать сначала.",
+            reply_markup=ReplyKeyboardMarkup([["Новый диалог"]], resize_keyboard=True))
+
+    elif text == "Назад":
+
+        await start(update, context)
     else:
         await update.message.reply_text("Пожалуйста, выбери одну из доступных опций.")
 
@@ -257,10 +329,3 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
 app.run_polling()
-
-
-
-if user_exists("ivan_telegram"):
-    print("Пользователь найден в базе")
-else:
-    print("Такого пользователя нет")
