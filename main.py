@@ -8,6 +8,14 @@ import logging
 from openai import OpenAI
 from func import bot_respond,deepseek_respond,save_to_db,get_db,get_chat_history,mark_old
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from telegram import Bot
+from telegram.ext import Application
+import asyncio
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import CallbackContext, CallbackQueryHandler, CommandHandler
+
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from config import TOKEN
@@ -28,12 +36,25 @@ locationurl = {}
 login = {}
 password = {}
 
+
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         ["Моё расписание", "Чат с ассистентом"]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text("Выберите опцию:", reply_markup=reply_markup)
+
+    username = update.message.from_user.username
+    tg_id = update.message.from_user.id
+
+    if not username:
+        await update.message.reply_text("У вас не задан username в Telegram. Установите его в настройках профиля.")
+        return
+
+    add_user_if_not_exists(tg_id, username)
+
 def user_exists(tg_id: str) -> bool:
     try:
         conn = psycopg2.connect(
@@ -272,33 +293,54 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "Моё расписание":
-        if not username:
-            await update.message.reply_text("У вас не задан username в Telegram. Установите его в настройках профиля.")
-            return
-
         if user_exists(tg_id):
-            await update.message.reply_text("Вы уже зарегистрированы. Вот ваше расписание 📅")
+            # Получаем сохраненные данные
+            try:
+                conn = psycopg2.connect(
+                    dbname="test",
+                    user="postgres",
+                    password="max11skv",
+                    host="localhost",
+                    port="5432"
+                )
+                cursor = conn.cursor()
+                cursor.execute("SELECT url, login, password FROM users WHERE tg_id = %s", (tg_id,))
+                result = cursor.fetchone()
+                cursor.close()
+                conn.close()
+
+                if result and all(result):
+                    url, login_data, password_data = result
+                    await get_events(update, context, url, login_data, password_data)
+                else:
+                    await update.message.reply_text("У вас не настроены данные для доступа к календарю. Введите URL:")
+                    user_states[tg_id] = "waiting_for_location_url"
+            except Exception as e:
+                await update.message.reply_text(f"Ошибка при получении данных: {str(e)}")
         else:
-            add_user_if_not_exists(tg_id, username)
-            await update.message.reply_text("Вы были успешно зарегистрированы! ✅")
-        await ask_for_location_url(update, context)
+            await update.message.reply_text("Вы не зарегистрированы. Введите URL для доступа к календарю:")
+            user_states[tg_id] = "waiting_for_location_url"
         return
 
     elif user_states.get(tg_id) == "waiting_for_location_url":
+        locationurl[tg_id] = text
+        await update.message.reply_text("Теперь введите пароль к календарю:")
+        user_states[tg_id] = "Password"
+        return
 
-        await update.message.reply_text(f"Спасибо! Вы отправили ссылку:\n{text}")
-        locationurl[tg_id]=text
-        user_states.pop(tg_id)
-        await update.message.reply_text('Введите Login')
-        user_states[tg_id]='Login'
-    elif user_states.get(tg_id) == "Login":
-        await update.message.reply_text('Введите Password')
-        login[tg_id]=text
-        user_states[tg_id] = 'Password'
     elif user_states.get(tg_id) == "Password":
-        password[tg_id]=text
+        password[tg_id] = text
+        await update.message.reply_text("Теперь введите логин к календарю:")
+        user_states[tg_id] = "Login"
+        return
+
+    elif user_states.get(tg_id) == "Login":
+        login[tg_id] = text
         save_user_credentials(tg_id, locationurl[tg_id], login[tg_id], password[tg_id])
+        await update.message.reply_text("Данные сохранены. Загружаю события календаря...")
         await get_events(update, context, locationurl[tg_id], login[tg_id], password[tg_id])
+        user_states.pop(tg_id, None)
+        return
 
     elif text == "Чат с ассистентом":
         keyboard = [["DeepSeek free", "Gemini", "DeepSeek"], ["Назад"]]
