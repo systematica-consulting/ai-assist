@@ -116,3 +116,11 @@ def mark_old(tg_id: int):
         conn.rollback()
     finally:
         conn.close()
+def initilization():
+    conn = get_db()
+    cursor = conn.cursor()
+    with open("create_db.sql") as file:
+        sql_script = file.read()
+    cursor.execute(sql_script)
+    conn.commit()
+    conn.close()
