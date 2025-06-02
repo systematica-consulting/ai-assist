@@ -36,9 +36,6 @@ locationurl = {}
 login = {}
 password = {}
 
-
-
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         ["Моё расписание", "Чат с ассистентом"]
@@ -57,15 +54,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def user_exists(tg_id: str) -> bool:
     try:
-        conn = psycopg2.connect(
-            #dbname="test",
-            dbname="postgres",
-            user="postgres",
-            #password="max11skv",
-            password="postgres",
-            host="localhost",
-            port="5432"
-        )
+        conn = get_db()
         cursor = conn.cursor()
         cursor.execute("SELECT 1 FROM users WHERE tg_id = %s", (tg_id,))
         result = cursor.fetchone()
@@ -176,15 +165,7 @@ async def get_events(update: Update, context: ContextTypes.DEFAULT_TYPE,  locati
 
 def save_user_credentials(tg_id: str, locationurl: str, login: str, password: str):
     try:
-        conn = psycopg2.connect(
-            # dbname="test",
-            dbname="postgres",
-            user="postgres",
-            # password="max11skv",
-            password="postgres",
-            host="localhost",
-            port="5432"
-        )
+        conn = get_db()
         cursor = conn.cursor()
 
 
@@ -206,15 +187,7 @@ async def ask_for_location_url(update: Update, context: ContextTypes.DEFAULT_TYP
 
 def add_user_if_not_exists(tg_id, username: str):
     try:
-        conn = psycopg2.connect(
-            # dbname="test",
-            dbname="postgres",
-            user="postgres",
-            # password="max11skv",
-            password="postgres",
-            host="localhost",
-            port="5432"
-        )
+        conn = get_db()
         cursor = conn.cursor()
 
         # Проверка существования
@@ -293,16 +266,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "Моё расписание":
+        if not username:
+            await update.message.reply_text("У вас не задан username в Telegram. Установите его в настройках профиля.")
+            return
+
         if user_exists(tg_id):
             # Получаем сохраненные данные
             try:
-                conn = psycopg2.connect(
-                    dbname="test",
-                    user="postgres",
-                    password="max11skv",
-                    host="localhost",
-                    port="5432"
-                )
+                conn = get_db()
                 cursor = conn.cursor()
                 cursor.execute("SELECT url, login, password FROM users WHERE tg_id = %s", (tg_id,))
                 result = cursor.fetchone()
