@@ -6,8 +6,7 @@ from caldav.elements import dav, cdav
 import psycopg2
 import logging
 from openai import OpenAI
-from func import bot_respond,deepseek_respond,save_to_db,get_db,get_chat_history,mark_old
-
+from func import bot_respond,deepseek_respond,save_to_db,get_db,get_chat_history,mark_old,initilization
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telegram import Bot
 from telegram.ext import Application
@@ -19,6 +18,7 @@ from telegram.ext import CallbackContext, CallbackQueryHandler, CommandHandler
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from config import TOKEN
+
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
@@ -337,6 +337,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Пожалуйста, выбери одну из доступных опций.")
 
 # Запуск бота
+initilization()
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
