@@ -1,5 +1,5 @@
 from openai import OpenAI
-from config import TOKEN,AI_TOKEN,DEEP_SEEK_TOKEN
+from config import TOKEN,AI_TOKEN,DEEP_SEEK_TOKEN,db_name,db_user,db_password,db_host
 import psycopg2
 def bot_respond(request,mod):
     client = OpenAI(
@@ -74,10 +74,10 @@ def save_to_db(tg_id: int, request: str = None, response: str = None, is_old: bo
 def get_db():
     """Устанавливает соединение с PostgreSQL"""
     return psycopg2.connect(
-        dbname="postgres",
-        user="postgres",
-        password="postgres",
-        host="localhost"
+        dbname = db_name,
+        user = db_user,
+        password = db_password,
+        host = db_host
     )
 def get_chat_history(tg_id: int):
     """Возвращает историю текущего диалога"""
