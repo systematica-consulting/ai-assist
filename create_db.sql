@@ -1,4 +1,4 @@
-CREATE TABLE users
+CREATE TABLE IF NOT EXISTS users
 (
   id SERIAL PRIMARY KEY,
   tg_id INTeger unique,
@@ -8,7 +8,7 @@ CREATE TABLE users
   tgname VARCHAR(2048)
 
 );
-CREATE TABLE history(
+CREATE TABLE IF NOT EXISTS history(
     ID SERIAL primary key,
     user_id integer,
     foreign key (user_id) REFERENCES users(ID),
